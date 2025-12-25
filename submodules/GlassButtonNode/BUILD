@@ -12,6 +12,7 @@ swift_library(
     deps = [
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
     	"//submodules/Display:Display",
+        "//submodules/TelegramUI/Components/CustomLiquidGlass",
     ],
     visibility = [
         "//visibility:public",

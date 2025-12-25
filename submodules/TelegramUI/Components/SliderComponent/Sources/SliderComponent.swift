@@ -5,6 +5,7 @@ import AsyncDisplayKit
 import TelegramPresentationData
 import LegacyComponents
 import ComponentFlow
+import CustomLiquidGlass
 
 public final class SliderComponent: Component {
     public final class Discrete: Equatable {
@@ -241,24 +242,36 @@ public final class SliderComponent: Component {
                     sliderView.backColor = component.trackBackgroundColor
                     sliderView.startColor = component.trackBackgroundColor
                     sliderView.trackColor = component.trackForegroundColor
-                    if let knobSize = component.knobSize {
-                        sliderView.knobImage = generateImage(CGSize(width: 40.0, height: 40.0), rotatedContext: { size, context in
-                            context.clear(CGRect(origin: CGPoint(), size: size))
-                            context.setShadow(offset: CGSize(width: 0.0, height: -3.0), blur: 12.0, color: UIColor(white: 0.0, alpha: 0.25).cgColor)
-                            if let knobColor = component.knobColor {
-                                context.setFillColor(knobColor.cgColor)
-                            } else {
+                    // Use glass-styled thumb for iOS < 26
+                    if #available(iOS 26.0, *) {
+                        // iOS 26 uses native glass effects
+                        if let knobSize = component.knobSize {
+                            sliderView.knobImage = generateImage(CGSize(width: 40.0, height: 40.0), rotatedContext: { size, context in
+                                context.clear(CGRect(origin: CGPoint(), size: size))
+                                context.setShadow(offset: CGSize(width: 0.0, height: -3.0), blur: 12.0, color: UIColor(white: 0.0, alpha: 0.25).cgColor)
+                                if let knobColor = component.knobColor {
+                                    context.setFillColor(knobColor.cgColor)
+                                } else {
+                                    context.setFillColor(UIColor.white.cgColor)
+                                }
+                                context.fillEllipse(in: CGRect(origin: CGPoint(x: floor((size.width - knobSize) * 0.5), y: floor((size.width - knobSize) * 0.5)), size: CGSize(width: knobSize, height: knobSize)))
+                            })
+                        } else {
+                            sliderView.knobImage = generateImage(CGSize(width: 40.0, height: 40.0), rotatedContext: { size, context in
+                                context.clear(CGRect(origin: CGPoint(), size: size))
+                                context.setShadow(offset: CGSize(width: 0.0, height: -3.0), blur: 12.0, color: UIColor(white: 0.0, alpha: 0.25).cgColor)
                                 context.setFillColor(UIColor.white.cgColor)
-                            }
-                            context.fillEllipse(in: CGRect(origin: CGPoint(x: floor((size.width - knobSize) * 0.5), y: floor((size.width - knobSize) * 0.5)), size: CGSize(width: knobSize, height: knobSize)))
-                        })
+                                context.fillEllipse(in: CGRect(origin: CGPoint(x: 6.0, y: 6.0), size: CGSize(width: 28.0, height: 28.0)))
+                            })
+                        }
                     } else {
-                        sliderView.knobImage = generateImage(CGSize(width: 40.0, height: 40.0), rotatedContext: { size, context in
-                            context.clear(CGRect(origin: CGPoint(), size: size))
-                            context.setShadow(offset: CGSize(width: 0.0, height: -3.0), blur: 12.0, color: UIColor(white: 0.0, alpha: 0.25).cgColor)
-                            context.setFillColor(UIColor.white.cgColor)
-                            context.fillEllipse(in: CGRect(origin: CGPoint(x: 6.0, y: 6.0), size: CGSize(width: 28.0, height: 28.0)))
-                        })
+                        // Use glass-styled thumb for iOS < 26
+                        let knobSize = component.knobSize ?? 28.0
+                        let tintColor = component.knobColor ?? .white
+                        sliderView.knobImage = LiquidGlassSliderThumbView.generateThumbImage(
+                            size: CGSize(width: knobSize, height: knobSize),
+                            tintColor: tintColor
+                        )
                     }
                     
                     sliderView.frame = CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: size)

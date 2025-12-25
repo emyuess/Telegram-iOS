@@ -17,7 +17,7 @@ swift_library(
         "//submodules/ShimmerEffect",
         "//submodules/Components/BundleIconComponent",
         "//submodules/TelegramUI/Components/GlassBackgroundComponent",
-        
+        "//submodules/TelegramUI/Components/CustomLiquidGlass",
     ],
     visibility = [
         "//visibility:public",

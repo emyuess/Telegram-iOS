@@ -3,6 +3,7 @@ import Display
 import UIKit
 import AsyncDisplayKit
 import SwiftSignalKit
+import CustomLiquidGlass
 
 private let largeButtonSize = CGSize(width: 72.0, height: 72.0)
 private let smallButtonSize = CGSize(width: 60.0, height: 60.0)
@@ -118,6 +119,11 @@ public final class GlassButtonNode: HighlightTrackingButtonNode {
             if let strongSelf = self {
                 strongSelf.internalHighlighted = highlighted
                 strongSelf.updateState(highlighted: highlighted, selected: strongSelf.isSelected)
+
+                // Apply bounce animation on release
+                if !highlighted {
+                    LiquidGlassButtonDecorator.applyBounceAnimation(to: strongSelf.layer)
+                }
             }
         }
     }

@@ -11,6 +11,7 @@ import UIKitRuntimeUtils
 import BundleIconComponent
 import TextBadgeComponent
 import LiquidLens
+import CustomLiquidGlass
 import AppBundle
 
 private final class TabSelectionRecognizer: UIGestureRecognizer {
@@ -290,7 +291,27 @@ public final class TabBarComponent: Component {
                 }
             case .changed:
                 if var selectionGestureState = self.selectionGestureState {
-                    selectionGestureState.currentX = selectionGestureState.startX + recognizer.translation(in: self).x
+                    let rawTranslationX = recognizer.translation(in: self).x
+                    let targetX = selectionGestureState.startX + rawTranslationX
+
+                    // Apply rubber-band effect when dragging past bounds
+                    let minX: CGFloat = 0.0
+                    let maxX: CGFloat = self.bounds.width - 60.0 // Approximate lens width
+
+                    let rubberBandedX: CGFloat
+                    if targetX < minX {
+                        let overflow = minX - targetX
+                        let rubberBandOffset = LiquidGlassAnimator.rubberBandOffset(offset: overflow, dimension: self.bounds.width)
+                        rubberBandedX = minX - rubberBandOffset
+                    } else if targetX > maxX {
+                        let overflow = targetX - maxX
+                        let rubberBandOffset = LiquidGlassAnimator.rubberBandOffset(offset: overflow, dimension: self.bounds.width)
+                        rubberBandedX = maxX + rubberBandOffset
+                    } else {
+                        rubberBandedX = targetX
+                    }
+
+                    selectionGestureState.currentX = rubberBandedX
                     self.selectionGestureState = selectionGestureState
                     self.state?.updated(transition: .immediate, isLocal: true)
                 }

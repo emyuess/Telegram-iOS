@@ -13,6 +13,7 @@ import ContextUI
 import ReactionButtonListComponent
 import LottieComponent
 import GlassBackgroundComponent
+import CustomLiquidGlass
 
 private class ButtonIcon: Equatable {
     enum IconType: Equatable {
@@ -312,11 +313,21 @@ public final class MessageInputActionButtonComponent: Component {
                 guard let self else {
                     return
                 }
-                
-                let scale: CGFloat = highlighted ? 0.6 : 1.0
-                
-                let transition = ComponentTransition(animation: .curve(duration: highlighted ? 0.5 : 0.3, curve: .spring))
-                transition.setSublayerTransform(view: self, transform: CATransform3DMakeScale(scale, scale, 1.0))
+
+                if highlighted {
+                    // Scale down with quick animation
+                    let scale = LiquidGlassConfiguration.Scale.pressed
+                    let transition = ComponentTransition(animation: .curve(duration: LiquidGlassConfiguration.Duration.press, curve: .spring))
+                    transition.setSublayerTransform(view: self, transform: CATransform3DMakeScale(scale, scale, 1.0))
+                } else {
+                    // Bounce back with spring physics
+                    LiquidGlassButtonDecorator.applyBounceAnimation(
+                        to: self.layer,
+                        from: LiquidGlassConfiguration.Scale.pressed,
+                        to: 1.0,
+                        velocity: 0.5
+                    )
+                }
             }
             
             self.button.addTarget(self, action: #selector(self.touchDown), forControlEvents: .touchDown)

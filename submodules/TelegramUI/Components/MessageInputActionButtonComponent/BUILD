@@ -22,6 +22,7 @@ swift_library(
         "//submodules/Components/ReactionButtonListComponent",
         "//submodules/TelegramCore",
         "//submodules/TelegramUI/Components/GlassBackgroundComponent",
+        "//submodules/TelegramUI/Components/CustomLiquidGlass",
     ],
     visibility = [
         "//visibility:public",

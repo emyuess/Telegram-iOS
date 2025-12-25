@@ -7,6 +7,9 @@ import UIKitRuntimeUtils
 import AnimatedStickerNode
 import TelegramAnimatedStickerNode
 import TelegramPresentationData
+import CustomLiquidGlass
+import GlassBackgroundComponent
+import QuartzCore
 
 private extension CGRect {
     var center: CGPoint {
@@ -310,10 +313,118 @@ private final class TabBarNodeContainer {
 final class TabBarNodeItem {
     let item: UITabBarItem
     let contextActionType: TabBarItemContextActionType
-    
+
     init(item: UITabBarItem, contextActionType: TabBarItemContextActionType) {
         self.item = item
         self.contextActionType = contextActionType
+    }
+}
+
+/// Liquid Glass lens view for tab bar selection indicator on iOS < 26
+private final class TabBarLensView: UIView {
+    private let blurEffectView: UIVisualEffectView
+    private let glassOverlayView: UIImageView
+    private var isDark: Bool = false
+    private var currentSize: CGSize = .zero
+
+    override init(frame: CGRect) {
+        let blurEffect = UIBlurEffect(style: .light)
+        self.blurEffectView = UIVisualEffectView(effect: blurEffect)
+        self.glassOverlayView = UIImageView()
+
+        super.init(frame: frame)
+
+        self.clipsToBounds = true
+        self.layer.cornerCurve = .continuous
+        self.addSubview(blurEffectView)
+        self.addSubview(glassOverlayView)
+
+        self.configureBlurFilter()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func configureBlurFilter() {
+        if let sublayer = blurEffectView.layer.sublayers?[0], let filters = sublayer.filters {
+            sublayer.backgroundColor = nil
+            sublayer.isOpaque = false
+
+            var blurFilter: NSObject?
+            for filter in filters {
+                if let filter = filter as? NSObject, String(describing: filter).contains("gaussianBlur") {
+                    blurFilter = filter
+                    break
+                }
+            }
+
+            if let filter = blurFilter {
+                filter.setValue(8.0 as NSNumber, forKey: "inputRadius")
+                sublayer.filters = [filter]
+            }
+        }
+    }
+
+    func update(size: CGSize, isDark: Bool, animated: Bool) {
+        let needsImageUpdate = self.currentSize != size || self.isDark != isDark
+        self.currentSize = size
+        self.isDark = isDark
+
+        let cornerRadius = min(size.width, size.height) * 0.5
+        self.layer.cornerRadius = cornerRadius
+
+        self.blurEffectView.frame = CGRect(origin: .zero, size: size)
+
+        if needsImageUpdate {
+            let tintAlpha: CGFloat = isDark ? 0.1 : 0.075
+            let tintColor = UIColor(white: isDark ? 1.0 : 0.0, alpha: tintAlpha)
+
+            let overlayImage = GlassBackgroundView.generateLegacyGlassImage(
+                size: size,
+                inset: 0,
+                isDark: isDark,
+                fillColor: tintColor
+            )
+            self.glassOverlayView.image = overlayImage
+        }
+        self.glassOverlayView.frame = CGRect(origin: .zero, size: size)
+    }
+
+    func animatePosition(to newFrame: CGRect, animated: Bool) {
+        if animated {
+            let animation = CASpringAnimation(keyPath: "position")
+            animation.fromValue = NSValue(cgPoint: self.layer.position)
+            animation.toValue = NSValue(cgPoint: CGPoint(x: newFrame.midX, y: newFrame.midY))
+            animation.mass = LiquidGlassConfiguration.Spring.mass
+            animation.stiffness = LiquidGlassConfiguration.Spring.stiffness
+            animation.damping = LiquidGlassConfiguration.Spring.damping
+            animation.duration = animation.settlingDuration
+            animation.fillMode = .forwards
+            animation.isRemovedOnCompletion = false
+
+            let boundsAnimation = CASpringAnimation(keyPath: "bounds.size")
+            boundsAnimation.fromValue = NSValue(cgSize: self.bounds.size)
+            boundsAnimation.toValue = NSValue(cgSize: newFrame.size)
+            boundsAnimation.mass = LiquidGlassConfiguration.Spring.mass
+            boundsAnimation.stiffness = LiquidGlassConfiguration.Spring.stiffness
+            boundsAnimation.damping = LiquidGlassConfiguration.Spring.damping
+            boundsAnimation.duration = boundsAnimation.settlingDuration
+            boundsAnimation.fillMode = .forwards
+            boundsAnimation.isRemovedOnCompletion = false
+
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { [weak self] in
+                self?.layer.removeAnimation(forKey: "lensPosition")
+                self?.layer.removeAnimation(forKey: "lensBounds")
+                self?.frame = newFrame
+            }
+            self.layer.add(animation, forKey: "lensPosition")
+            self.layer.add(boundsAnimation, forKey: "lensBounds")
+            CATransaction.commit()
+        } else {
+            self.frame = newFrame
+        }
     }
 }
 
@@ -332,10 +443,13 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 if let oldValue = oldValue {
                     self.updateNodeImage(oldValue, layout: true)
                 }
-                
+
                 if let selectedIndex = self.selectedIndex {
                     self.updateNodeImage(selectedIndex, layout: true)
                 }
+
+                // Update lens position
+                self.updateLensPosition(animated: oldValue != nil)
             }
         }
     }
@@ -353,6 +467,10 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
 
     let backgroundNode: NavigationBackgroundNode
     private var tabBarNodeContainers: [TabBarNodeContainer] = []
+
+    // Liquid Glass lens view for selected tab
+    private var lensView: TabBarLensView?
+    private var currentLensFrame: CGRect = .zero
     
     private var tapRecognizer: TapLongTapOrDoubleTapGestureRecognizer?
     
@@ -381,7 +499,7 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
     
     override func didLoad() {
         super.didLoad()
-        
+
         let recognizer = TapLongTapOrDoubleTapGestureRecognizer(target: self, action: #selector(self.tapLongTapOrDoubleTapGesture(_:)))
         recognizer.delegate = self.wrappedGestureRecognizerDelegate
         recognizer.tapActionAtPoint = { _ in
@@ -389,6 +507,16 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
         }
         self.tapRecognizer = recognizer
         self.view.addGestureRecognizer(recognizer)
+
+        // Setup liquid glass lens view for iOS < 26
+        if #available(iOS 26.0, *) {
+            // iOS 26 uses native liquid lens
+        } else {
+            let lensView = TabBarLensView(frame: .zero)
+            lensView.alpha = 0.0
+            self.view.insertSubview(lensView, aboveSubview: self.backgroundNode.view)
+            self.lensView = lensView
+        }
     }
     
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -775,8 +903,51 @@ class TabBarNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 }
             }
         }
+
+        // Update lens position after layout
+        self.updateLensPosition(animated: !transition.isAnimated)
     }
-    
+
+    private func updateLensPosition(animated: Bool) {
+        guard let lensView = self.lensView else { return }
+        guard let selectedIndex = self.selectedIndex, selectedIndex < self.tabBarNodeContainers.count else {
+            UIView.animate(withDuration: 0.2) {
+                lensView.alpha = 0.0
+            }
+            return
+        }
+
+        let container = self.tabBarNodeContainers[selectedIndex]
+        let node = container.imageNode
+
+        // Calculate lens frame based on selected tab
+        let nodeFrame = node.frame
+        let padding: CGFloat = 8.0
+        let lensFrame = CGRect(
+            x: nodeFrame.origin.x - padding,
+            y: nodeFrame.origin.y - 2.0,
+            width: nodeFrame.width + padding * 2,
+            height: nodeFrame.height + 4.0
+        )
+
+        // Update lens view
+        let isDark = self.theme.overallDarkAppearance
+        lensView.update(size: lensFrame.size, isDark: isDark, animated: animated)
+
+        if self.currentLensFrame != lensFrame {
+            let shouldAnimate = animated && self.currentLensFrame != .zero && !self.reduceMotion
+            lensView.animatePosition(to: lensFrame, animated: shouldAnimate)
+            self.currentLensFrame = lensFrame
+        }
+
+        if lensView.alpha == 0.0 {
+            lensView.frame = lensFrame
+            UIView.animate(withDuration: 0.2) {
+                lensView.alpha = 1.0
+            }
+        }
+    }
+
     private func tapped(at location: CGPoint, longTap: Bool) {
         if let bottomInset = self.validLayout?.4 {
             if location.y > self.bounds.size.height - bottomInset {

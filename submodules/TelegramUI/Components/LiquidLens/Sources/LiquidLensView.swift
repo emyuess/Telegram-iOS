@@ -3,6 +3,7 @@ import UIKit
 import Display
 import ComponentFlow
 import GlassBackgroundComponent
+import QuartzCore
 
 private final class RestingBackgroundView: UIVisualEffectView {
     var isDark: Bool?
@@ -57,6 +58,108 @@ private final class RestingBackgroundView: UIVisualEffectView {
     }
 }
 
+/// Custom blur lens view for iOS < 26 with glass effect
+private final class LegacyLiquidLensBlurView: UIView {
+    private let blurEffectView: UIVisualEffectView
+    private let glassOverlayView: UIImageView
+    private var isDark: Bool = false
+    private var currentSize: CGSize = .zero
+
+    override init(frame: CGRect) {
+        let blurEffect = UIBlurEffect(style: .light)
+        self.blurEffectView = UIVisualEffectView(effect: blurEffect)
+        self.glassOverlayView = UIImageView()
+
+        super.init(frame: frame)
+
+        self.clipsToBounds = true
+        self.addSubview(blurEffectView)
+        self.addSubview(glassOverlayView)
+
+        // Configure blur for glass effect
+        self.configureBlurFilter()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func configureBlurFilter() {
+        // Apply custom blur radius matching iOS 26 glass effect
+        if let sublayer = blurEffectView.layer.sublayers?[0], let filters = sublayer.filters {
+            sublayer.backgroundColor = nil
+            sublayer.isOpaque = false
+
+            // Keep only gaussianBlur filter and set custom radius
+            var blurFilter: NSObject?
+            for filter in filters {
+                if let filter = filter as? NSObject, String(describing: filter).contains("gaussianBlur") {
+                    blurFilter = filter
+                    break
+                }
+            }
+
+            if let filter = blurFilter {
+                filter.setValue(8.0 as NSNumber, forKey: "inputRadius")
+                sublayer.filters = [filter]
+            }
+        }
+    }
+
+    func update(size: CGSize, cornerRadius: CGFloat, isDark: Bool, isLifted: Bool, transition: ComponentTransition) {
+        let needsImageUpdate = self.currentSize != size || self.isDark != isDark
+        self.currentSize = size
+        self.isDark = isDark
+
+        // Update corner radius
+        let effectiveCornerRadius = min(size.width, size.height) * 0.5
+        transition.setCornerRadius(layer: self.layer, cornerRadius: effectiveCornerRadius)
+
+        // Update blur view frame
+        transition.setFrame(view: self.blurEffectView, frame: CGRect(origin: .zero, size: size))
+
+        // Update glass overlay
+        if needsImageUpdate {
+            let tintAlpha: CGFloat = isDark ? 0.1 : 0.075
+            let tintColor = UIColor(white: isDark ? 1.0 : 0.0, alpha: tintAlpha)
+
+            // Generate glass overlay image
+            let overlayImage = GlassBackgroundView.generateLegacyGlassImage(
+                size: size,
+                inset: 0,
+                isDark: isDark,
+                fillColor: tintColor
+            )
+            self.glassOverlayView.image = overlayImage
+        }
+        transition.setFrame(view: self.glassOverlayView, frame: CGRect(origin: .zero, size: size))
+
+        // Apply lift scale animation
+        let scale: CGFloat = isLifted ? 1.15 : 1.0
+        if !transition.animation.isImmediate {
+            let animation = CASpringAnimation(keyPath: "transform.scale")
+            animation.fromValue = self.layer.presentation()?.value(forKeyPath: "transform.scale") ?? self.transform.a
+            animation.toValue = scale
+            animation.mass = 1.0
+            animation.stiffness = 555.027
+            animation.damping = 47.118
+            animation.duration = animation.settlingDuration
+            animation.fillMode = .forwards
+            animation.isRemovedOnCompletion = false
+
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { [weak self] in
+                self?.layer.removeAnimation(forKey: "liftScale")
+                self?.transform = CGAffineTransform(scaleX: scale, y: scale)
+            }
+            self.layer.add(animation, forKey: "liftScale")
+            CATransaction.commit()
+        } else {
+            self.transform = CGAffineTransform(scaleX: scale, y: scale)
+        }
+    }
+}
+
 public final class LiquidLensView: UIView {
     private struct Params: Equatable {
         var size: CGSize
@@ -97,6 +200,7 @@ public final class LiquidLensView: UIView {
     private var legacyContentMaskView: UIView?
     private var legacyContentMaskBlobView: UIImageView?
     private var legacyLiftedContentBlobMaskView: UIImageView?
+    private var legacyBlurLensView: LegacyLiquidLensBlurView?
 
     public var selectedContentView: UIView {
         return self.liftedContainerView
@@ -195,26 +299,31 @@ public final class LiquidLensView: UIView {
             let legacySelectionView = GlassBackgroundView.ContentImageView()
             self.legacySelectionView = legacySelectionView
             self.backgroundView.contentView.insertSubview(legacySelectionView, at: 0)
-            
+
+            // Add blur lens view for glass effect on iOS < 26
+            let legacyBlurLensView = LegacyLiquidLensBlurView(frame: .zero)
+            self.legacyBlurLensView = legacyBlurLensView
+            self.backgroundView.contentView.insertSubview(legacyBlurLensView, at: 1)
+
             let legacyContentMaskView = UIView()
             legacyContentMaskView.backgroundColor = .white
             self.legacyContentMaskView = legacyContentMaskView
             self.contentView.mask = legacyContentMaskView
-            
+
             if let filter = CALayer.luminanceToAlpha() {
                 legacyContentMaskView.layer.filters = [filter]
             }
-            
+
             let legacyContentMaskBlobView = UIImageView()
             self.legacyContentMaskBlobView = legacyContentMaskBlobView
             legacyContentMaskView.addSubview(legacyContentMaskBlobView)
-            
+
             self.containerView.addSubview(self.contentView)
-            
+
             let legacyLiftedContentBlobMaskView = UIImageView()
             self.legacyLiftedContentBlobMaskView = legacyLiftedContentBlobMaskView
             self.liftedContainerView.mask = legacyLiftedContentBlobMaskView
-            
+
             self.containerView.addSubview(self.liftedContainerView)
         }
     }
@@ -339,7 +448,7 @@ public final class LiquidLensView: UIView {
         if let legacyContentMaskBlobView = self.legacyContentMaskBlobView, let legacyLiftedContentBlobMaskView = self.legacyLiftedContentBlobMaskView, let legacySelectionView = self.legacySelectionView {
             let lensFrame = baseLensFrame.insetBy(dx: 4.0, dy: 4.0)
             let effectiveLensFrame = lensFrame.insetBy(dx: params.isLifted ? -2.0 : 0.0, dy: params.isLifted ? -2.0 : 0.0)
-            
+
             if legacyContentMaskBlobView.image?.size.height != lensFrame.height {
                 legacyContentMaskBlobView.image = generateStretchableFilledCircleImage(diameter: lensFrame.height, color: .black)
                 legacyLiftedContentBlobMaskView.image = legacyContentMaskBlobView.image
@@ -347,9 +456,21 @@ public final class LiquidLensView: UIView {
             }
             transition.setFrame(view: legacyContentMaskBlobView, frame: effectiveLensFrame)
             transition.setFrame(view: legacyLiftedContentBlobMaskView, frame: effectiveLensFrame)
-            
+
             legacySelectionView.tintColor = UIColor(white: params.isDark ? 1.0 : 0.0, alpha: params.isDark ? 0.1 : 0.075)
             transition.setFrame(view: legacySelectionView, frame: effectiveLensFrame)
+
+            // Update blur lens view for glass effect
+            if let legacyBlurLensView = self.legacyBlurLensView {
+                transition.setFrame(view: legacyBlurLensView, frame: effectiveLensFrame)
+                legacyBlurLensView.update(
+                    size: effectiveLensFrame.size,
+                    cornerRadius: effectiveLensFrame.height * 0.5,
+                    isDark: params.isDark,
+                    isLifted: params.isLifted,
+                    transition: transition
+                )
+            }
         }
 
         transition.setFrame(view: self.restingBackgroundView, frame: CGRect(origin: CGPoint(), size: params.size))

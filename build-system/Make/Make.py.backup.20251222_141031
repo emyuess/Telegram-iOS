@@ -194,28 +194,6 @@ class BazelCommandLine:
                 # Require DSYM files as build output.
                 '--output_groups=+dsyms',
             ] + self.common_release_args
-        elif configuration == 'debug_sim_x86_64':
-            self.configuration_args = [
-                # bazel debug build configuration
-                '-c', 'dbg',
-
-                # Build for x86_64 simulator (Intel Macs)
-                '--ios_multi_cpus=x86_64',
-
-                # Always build universal Watch binaries.
-                '--watchos_cpus=arm64_32'
-            ] + self.common_debug_args
-        elif configuration == 'release_sim_x86_64':
-            self.configuration_args = [
-                # bazel optimized build configuration
-                '-c', 'opt',
-
-                # Build for x86_64 simulator (Intel Macs)
-                '--ios_multi_cpus=x86_64',
-
-                # Always build universal Watch binaries.
-                '--watchos_cpus=arm64_32'
-            ] + self.common_release_args
         else:
             raise Exception('Unknown configuration {}'.format(configuration))
 
@@ -988,8 +966,6 @@ if __name__ == '__main__':
             'debug_sim_arm64',
             'release_sim_arm64',
             'release_arm64',
-            'debug_sim_x86_64',
-            'release_sim_x86_64',
         ],
         required=True,
         help='Build configuration'
@@ -1234,8 +1210,6 @@ if __name__ == '__main__':
             'debug_sim_arm64',
             'release_sim_arm64',
             'release_arm64',
-            'debug_sim_x86_64',
-            'release_sim_x86_64',
         ],
         required=True,
         help='Build configuration'

@@ -7,6 +7,7 @@ import ActivityIndicator
 import BundleIconComponent
 import ShimmerEffect
 import GlassBackgroundComponent
+import CustomLiquidGlass
 
 public final class ButtonBadgeComponent: Component {
     let fillColor: UIColor
@@ -476,6 +477,8 @@ public final class ButtonComponent: Component {
                         } else {
                             transition.setBackgroundColor(view: self.containerView, color: component.background.color)
                             transition.setScale(view: self.containerView, scale: 1.0)
+                            // Apply bounce animation on release
+                            LiquidGlassButtonDecorator.applyBounceAnimation(to: self.containerView.layer)
                         }
                     case .legacy:
                         if highlighted {
